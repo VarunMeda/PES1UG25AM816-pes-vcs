@@ -93,23 +93,83 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-     // Step 1: Build header "blob <size>\0"
-char header[64];
-int header_len = sprintf(header, "blob %zu", size) + 1;  // +1 includes '\0'
+    (void)type; // for now assume blob (as per Phase 1)
 
-// Step 2: Allocate memory for full object (header + data)
-size_t total_size = header_len + size;
-char *full_object = malloc(total_size);
-if (!full_object) {
-    perror("malloc failed");
-    return -1;
+    // STEP 1: Build header "blob <size>\0"
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "blob %zu", len) + 1;
+
+    size_t total_size = header_len + len;
+
+    char *full_object = malloc(total_size);
+    if (!full_object) return -1;
+
+    memcpy(full_object, header, header_len);
+    memcpy(full_object + header_len, data, len);
+
+    // STEP 2: Compute hash
+    compute_hash(full_object, total_size, id_out);
+
+    // STEP 3: Check if already exists
+    if (object_exists(id_out)) {
+        free(full_object);
+        return 0;
+    }
+
+    // STEP 4: Get object path
+    char path[512];
+    object_path(id_out, path, sizeof(path));
+
+    // Extract directory path (first part)
+    char dir[512];
+    strncpy(dir, path, sizeof(dir));
+    char *slash = strrchr(dir, '/');
+    if (!slash) {
+        free(full_object);
+        return -1;
+    }
+    *slash = '\0';
+
+    // STEP 5: Create directory (.pes/objects/XX/)
+    mkdir(dir, 0755); // ignore error if exists
+
+    // STEP 6: Temp file path
+    char temp_path[512];
+    snprintf(temp_path, sizeof(temp_path), "%s/tmpXXXXXX", dir);
+
+    int fd = mkstemp(temp_path);
+    if (fd < 0) {
+        free(full_object);
+        return -1;
+    }
+
+    // STEP 7: Write full object
+    if (write(fd, full_object, total_size) != (ssize_t)total_size) {
+        close(fd);
+        free(full_object);
+        return -1;
+    }
+
+    // STEP 8: fsync file
+    fsync(fd);
+    close(fd);
+
+    // STEP 9: Rename to final path
+    if (rename(temp_path, path) != 0) {
+        free(full_object);
+        return -1;
+    }
+
+    // STEP 10: fsync directory (important for durability)
+    int dir_fd = open(dir, O_DIRECTORY);
+    if (dir_fd >= 0) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
+
+    free(full_object);
+    return 0;
 }
-
-// Step 3: Copy header + data into one buffer
-memcpy(full_object, header, header_len);
-memcpy(full_object + header_len, data, size); 
-}
-
 // Read an object from the store.
 //
 // Steps:
