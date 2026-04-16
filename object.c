@@ -93,9 +93,21 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // TODO: Implement
-    (void)type; (void)data; (void)len; (void)id_out;
+     // Step 1: Build header "blob <size>\0"
+char header[64];
+int header_len = sprintf(header, "blob %zu", size) + 1;  // +1 includes '\0'
+
+// Step 2: Allocate memory for full object (header + data)
+size_t total_size = header_len + size;
+char *full_object = malloc(total_size);
+if (!full_object) {
+    perror("malloc failed");
     return -1;
+}
+
+// Step 3: Copy header + data into one buffer
+memcpy(full_object, header, header_len);
+memcpy(full_object + header_len, data, size); 
 }
 
 // Read an object from the store.
@@ -117,8 +129,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 //   - compute_hash       : re-hashing the read data for integrity verification
 //   - memcmp             : comparing the computed hash against the requested hash
 //   - malloc, memcpy     : allocating and returning the extracted data
-//
-// The caller is responsible for calling free(*data_out).
+//// The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
     // TODO: Implement
