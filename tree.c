@@ -163,4 +163,20 @@ void *data = NULL;
     if (tree_serialize(&tree, &data, &len) != 0) {
         return -1;
     }
+void *data = NULL;
+    size_t len = 0;
+
+    if (tree_serialize(&tree, &data, &len) != 0) {
+        return -1;
+    }
+
+    // 🔹 STEP 5: Store tree  ← ADD HERE
+    if (object_write(OBJ_TREE, data, len, id_out) != 0) {
+        free(data);
+        return -1;
+    }
+
+    free(data);
+    return 0;
+}
 }
