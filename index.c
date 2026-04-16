@@ -180,6 +180,20 @@ int index_load(Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_save(const Index *index) {
+
+    // 🔹 STEP 5: Create a copy for sorting
+    Index sorted = *index;
+
+    // sorting function
+    int cmp(const void *a, const void *b) {
+        return strcmp(((IndexEntry*)a)->path,
+                      ((IndexEntry*)b)->path);
+    }
+
+    qsort(sorted.entries, sorted.count,
+          sizeof(IndexEntry), cmp);
+
+    // 🔹 NOW WRITE sorted instead of index
     char temp[] = ".pes/index.tmpXXXXXX";
     int fd = mkstemp(temp);
     if (fd < 0) return -1;
@@ -190,14 +204,15 @@ int index_save(const Index *index) {
         return -1;
     }
 
-    for (int i = 0; i < index->count; i++) {
-        const IndexEntry *e = &index->entries[i];
+    for (int i = 0; i < sorted.count; i++) {
+        const IndexEntry *e = &sorted.entries[i];
 
         char hex[HASH_HEX_SIZE + 1];
         hash_to_hex(&e->hash, hex);
 
         fprintf(f, "%o %s %lu %u %s\n",
-                e->mode, hex, e->mtime_sec, e->size, e->path);
+                e->mode, hex, e->mtime_sec,
+                e->size, e->path);
     }
 
     fflush(f);
