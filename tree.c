@@ -135,4 +135,26 @@ int tree_from_index(ObjectID *id_out) {
 if (index_load(&index) != 0) {
     return -1;
 }
+Tree tree;
+tree.count = 0;
+
+for (int i = 0; i < index.count; i++) {
+
+    IndexEntry *entry = &index.entries[i];
+    TreeEntry *tentry = &tree.entries[tree.count++];
+
+    // mode
+    tentry->mode = entry->mode;
+
+    // name (extract filename)
+    const char *slash = strrchr(entry->path, '/');
+    if (slash) {
+        strcpy(tentry->name, slash + 1);
+    } else {
+        strcpy(tentry->name, entry->path);
+    }
+
+    // hash
+    tentry->hash = entry->id;
+}
 }
