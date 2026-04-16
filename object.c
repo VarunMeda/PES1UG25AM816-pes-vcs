@@ -192,7 +192,92 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 //// The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+
+    // STEP 1: Get file path
+    char path[512];
+    object_path(id, path, sizeof(path));
+
+    // STEP 2: Open file
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return -1;
+
+    // STEP 3: Get file size
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    rewind(fp);
+
+    // STEP 4: Read entire file
+    char *buffer = malloc(file_size);
+    if (!buffer) {
+        fclose(fp);
+        return -1;
+    }
+
+    if (fread(buffer, 1, file_size, fp) != file_size) {
+        free(buffer);
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+
+    // STEP 5: Verify hash (CRITICAL)
+    ObjectID computed_id;
+    compute_hash(buffer, file_size, &computed_id);
+
+    if (memcmp(id->hash, computed_id.hash, HASH_SIZE) != 0) {
+        free(buffer);
+        return -1; // corruption detected
+    }
+
+    // STEP 6: Find header-data separator '\0'
+    char *null_pos = memchr(buffer, '\0', file_size);
+    if (!null_pos) {
+        free(buffer);
+        return -1;
+    }
+
+    // STEP 7: Parse header
+    // Format: "blob <size>"
+    size_t header_len = null_pos - buffer;
+
+    if (strncmp(buffer, "blob ", 5) == 0) {
+        *type_out = OBJ_BLOB;
+    } else if (strncmp(buffer, "tree ", 5) == 0) {
+        *type_out = OBJ_TREE;
+    } else if (strncmp(buffer, "commit ", 7) == 0) {
+        *type_out = OBJ_COMMIT;
+    } else {
+        free(buffer);
+        return -1;
+    }
+
+    // Extract size from header
+    size_t data_size;
+    if (sscanf(buffer + 5, "%zu", &data_size) != 1) {
+        free(buffer);
+        return -1;
+    }
+
+    // STEP 8: Extract data
+    char *data_start = null_pos + 1;
+
+    if ((size_t)(data_start - buffer + data_size) > file_size) {
+        free(buffer);
+        return -1;
+    }
+
+    void *data = malloc(data_size);
+    if (!data) {
+        free(buffer);
+        return -1;
+    }
+
+    memcpy(data, data_start, data_size);
+
+    // STEP 9: Set outputs
+    *data_out = data;
+    *len_out = data_size;
+
+    free(buffer);
+    return 0;
 }
