@@ -93,9 +93,9 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    (void)type; // for now assume blob (as per Phase 1)
+    (void)type; // Phase 1 assumes blob
 
-    // STEP 1: Build header "blob <size>\0"
+    // STEP 1: Build header
     char header[64];
     int header_len = snprintf(header, sizeof(header), "blob %zu", len) + 1;
 
@@ -110,17 +110,17 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     // STEP 2: Compute hash
     compute_hash(full_object, total_size, id_out);
 
-    // STEP 3: Check if already exists
+    // STEP 3: Deduplication
     if (object_exists(id_out)) {
         free(full_object);
         return 0;
     }
 
-    // STEP 4: Get object path
+    // STEP 4: Get path
     char path[512];
     object_path(id_out, path, sizeof(path));
 
-    // Extract directory path (first part)
+    // Extract directory
     char dir[512];
     strncpy(dir, path, sizeof(dir));
     char *slash = strrchr(dir, '/');
@@ -130,12 +130,15 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     }
     *slash = '\0';
 
-    // STEP 5: Create directory (.pes/objects/XX/)
-    mkdir(dir, 0755); // ignore error if exists
+    // STEP 5: Create directory
+    mkdir(dir, 0755);
 
-    // STEP 6: Temp file path
+    // STEP 6: Temp file
     char temp_path[512];
-    snprintf(temp_path, sizeof(temp_path), "%s/tmpXXXXXX", dir);
+    if (snprintf(temp_path, sizeof(temp_path), "%s/tmpXXXXXX", dir) >= (int)sizeof(temp_path)) {
+        free(full_object);
+        return -1;
+    }
 
     int fd = mkstemp(temp_path);
     if (fd < 0) {
@@ -143,7 +146,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
         return -1;
     }
 
-    // STEP 7: Write full object
+    // STEP 7: Write
     if (write(fd, full_object, total_size) != (ssize_t)total_size) {
         close(fd);
         free(full_object);
@@ -154,13 +157,13 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     fsync(fd);
     close(fd);
 
-    // STEP 9: Rename to final path
+    // STEP 9: Rename
     if (rename(temp_path, path) != 0) {
         free(full_object);
         return -1;
     }
 
-    // STEP 10: fsync directory (important for durability)
+    // STEP 10: fsync directory
     int dir_fd = open(dir, O_DIRECTORY);
     if (dir_fd >= 0) {
         fsync(dir_fd);
@@ -193,7 +196,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
 
-    // STEP 1: Get file path
+    // STEP 1: Path
     char path[512];
     object_path(id, path, sizeof(path));
 
@@ -201,12 +204,12 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     FILE *fp = fopen(path, "rb");
     if (!fp) return -1;
 
-    // STEP 3: Get file size
+    // STEP 3: File size
     fseek(fp, 0, SEEK_END);
     size_t file_size = ftell(fp);
     rewind(fp);
 
-    // STEP 4: Read entire file
+    // STEP 4: Read file
     char *buffer = malloc(file_size);
     if (!buffer) {
         fclose(fp);
@@ -220,26 +223,23 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     }
     fclose(fp);
 
-    // STEP 5: Verify hash (CRITICAL)
+    // STEP 5: Verify hash
     ObjectID computed_id;
     compute_hash(buffer, file_size, &computed_id);
 
     if (memcmp(id->hash, computed_id.hash, HASH_SIZE) != 0) {
         free(buffer);
-        return -1; // corruption detected
+        return -1;
     }
 
-    // STEP 6: Find header-data separator '\0'
+    // STEP 6: Find '\0'
     char *null_pos = memchr(buffer, '\0', file_size);
     if (!null_pos) {
         free(buffer);
         return -1;
     }
 
-    // STEP 7: Parse header
-    // Format: "blob <size>"
-    size_t header_len = null_pos - buffer;
-
+    // STEP 7: Parse type
     if (strncmp(buffer, "blob ", 5) == 0) {
         *type_out = OBJ_BLOB;
     } else if (strncmp(buffer, "tree ", 5) == 0) {
@@ -251,14 +251,14 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
         return -1;
     }
 
-    // Extract size from header
+    // STEP 8: Parse size
     size_t data_size;
     if (sscanf(buffer + 5, "%zu", &data_size) != 1) {
         free(buffer);
         return -1;
     }
 
-    // STEP 8: Extract data
+    // STEP 9: Extract data
     char *data_start = null_pos + 1;
 
     if ((size_t)(data_start - buffer + data_size) > file_size) {
@@ -274,7 +274,6 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
 
     memcpy(data, data_start, data_size);
 
-    // STEP 9: Set outputs
     *data_out = data;
     *len_out = data_size;
 
