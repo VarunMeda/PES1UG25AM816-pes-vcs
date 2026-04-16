@@ -157,4 +157,10 @@ for (int i = 0; i < index.count; i++) {
     // hash
     tentry->hash = entry->id;
 }
+void *data = NULL;
+    size_t len = 0;
+
+    if (tree_serialize(&tree, &data, &len) != 0) {
+        return -1;
+    }
 }
